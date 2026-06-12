@@ -605,7 +605,10 @@ def _session_is_evictable(sid: str, session: dict, now: float) -> bool:
     if session.get("running") or _session_pending_kind(sid):
         return False
     ready = session.get("agent_ready")
-    if ready is not None and not ready.is_set():  # still starting
+    # "Still starting" only exempts a build that actually began. Lazy watch
+    # sessions (subagent spectator windows) never start a build, so an unset
+    # event alone must not make them immortal.
+    if ready is not None and not ready.is_set() and session.get("agent_build_started"):
         return False
     if not _transport_is_dead(session.get("transport")):
         return False
@@ -930,7 +933,15 @@ def _start_agent_build(sid: str, session: dict) -> None:
                 except Exception:
                     session_db = None
             try:
-                agent = _make_agent(sid, key, session_db=session_db)
+                # Lazy-resumed (watch) sessions carry the stored conversation
+                # id — pass it through so the upgrade continues that session
+                # instead of starting a fresh one under the same key.
+                agent = _make_agent(
+                    sid,
+                    key,
+                    session_id=current.get("resume_session_id"),
+                    session_db=session_db,
+                )
             finally:
                 _clear_session_context(tokens)
 
@@ -2628,6 +2639,80 @@ def _on_tool_progress(
             payload["tool_preview"] = str(preview)
             payload["text"] = str(preview)
         _emit(event_type, sid, payload)
+        _mirror_subagent_to_child(event_type, payload)
+
+
+# ── Child-session live mirror ────────────────────────────────────────
+# A delegated child is not a live gateway session — it runs synchronously
+# inside the parent's turn, and its activity reaches the gateway only as
+# relayed ``subagent.*`` events on the PARENT sid. When a UI opens the child's
+# own session (session.resume on ``child_session_id``, e.g. the desktop's
+# open-in-new-window), that window would otherwise sit silent until the run
+# persists. Translate the relayed events into the native stream events the
+# window already renders — emitted on the CHILD sid, routed to its transport
+# by write_json — so the window shows a real midstream turn.
+_child_mirrors: dict[str, dict] = {}
+_child_mirrors_lock = threading.Lock()
+# Stored child session ids with a delegation run currently in flight (refreshed
+# on every relayed subagent.* event, popped on subagent.complete). Lets a lazy
+# watch resume report running=true so the window shows a busy indicator even
+# while the child is silent inside a long tool call (no events for 25s+).
+_active_child_runs: dict[str, float] = {}
+
+
+def _mirror_subagent_to_child(event_type: str, payload: dict) -> None:
+    child_key = str(payload.get("child_session_id") or "")
+    if not child_key:
+        return
+    # Liveness registry first — it must be accurate even when no window is
+    # open, so a window opened mid-run can immediately know the child is busy.
+    if event_type == "subagent.complete":
+        _active_child_runs.pop(child_key, None)
+    else:
+        _active_child_runs[child_key] = time.time()
+    # Live sessions are keyed by a fresh sid; the stored id rides on
+    # session_key. No live session (window not open / closed) → nothing to
+    # mirror; drop state so a reopened window starts a fresh synthetic turn.
+    live = _find_live_session_by_key(child_key)
+    if live is None:
+        with _child_mirrors_lock:
+            _child_mirrors.pop(child_key, None)
+        return
+    csid = live[0]
+    with _child_mirrors_lock:
+        st = _child_mirrors.setdefault(child_key, {"seq": 0, "open_tool": None, "started": False})
+        if not st["started"]:
+            st["started"] = True
+            _emit("message.start", csid)
+        if event_type == "subagent.thinking":
+            if text := str(payload.get("text") or ""):
+                _emit("reasoning.delta", csid, {"text": text})
+        elif event_type in {"subagent.start", "subagent.progress"}:
+            # Mirror branch-level progress lines so a just-opened child window
+            # shows immediate activity instead of waiting for the next tool or
+            # completion event. This matches the TUI /agents "live branch log"
+            # feel that users expect.
+            if text := str(payload.get("text") or ""):
+                _emit("message.delta", csid, {"text": f"{text}\n"})
+        elif event_type == "subagent.tool":
+            if st["open_tool"]:
+                _emit("tool.complete", csid, st["open_tool"])
+            st["seq"] += 1
+            tool = {
+                "name": str(payload.get("tool_name") or "tool"),
+                "tool_id": f"submirror:{child_key}:{st['seq']}",
+                "args": {},
+            }
+            if preview := str(payload.get("tool_preview") or payload.get("text") or ""):
+                tool["preview"] = preview
+            st["open_tool"] = tool
+            _emit("tool.start", csid, tool)
+        elif event_type == "subagent.complete":
+            if st["open_tool"]:
+                _emit("tool.complete", csid, st["open_tool"])
+            summary = str(payload.get("summary") or payload.get("text") or "")
+            _emit("message.complete", csid, {"text": summary})
+            _child_mirrors.pop(child_key, None)
 
 
 def _agent_cbs(sid: str) -> dict:
@@ -3826,7 +3911,125 @@ def _(rid, params: dict) -> dict:
                 transport=current_transport() or _stdio_transport,
             )
             payload["resumed"] = target
+            # Lazy watch sessions never own a run loop, so their payload's
+            # running flag is always False — overlay the child-run registry so
+            # a reconnecting watch window keeps its busy indicator while the
+            # delegated child is still mid-run.
+            if session.get("agent") is None and target in _active_child_runs:
+                payload["running"] = True
+                payload["status"] = "streaming"
             return _ok(rid, payload)
+
+    # Lazy/watch resume: register the live session WITHOUT building an agent.
+    # Used by the desktop's subagent windows — the child runs inside the
+    # parent's turn, so its window only needs the stored history plus a
+    # transport for the child-mirror's live events. Skipping _make_agent here
+    # is what keeps the window cheap while the backend is busy running the
+    # delegation. A later prompt.submit upgrades it via _start_agent_build
+    # (resume_session_id keeps the upgrade on the stored conversation).
+    if is_truthy_value(params.get("lazy", False)):
+        sid = uuid.uuid4().hex[:8]
+        lease, limit_message = _claim_active_session_slot(target, live_session_id=sid)
+        if limit_message is not None:
+            return _err(rid, 4090, limit_message)
+        try:
+            db.reopen_session(target)
+            # The child's OWN conversation only. Delegation children are
+            # parent-linked rows, so include_ancestors would prepend the
+            # parent's entire transcript — a watch window opened on a subagent
+            # must show the subagent's branch, not the parent's prompt.
+            history = db.get_messages_as_conversation(target)
+        except Exception as e:
+            if lease is not None:
+                lease.release()
+            return _err(rid, 5000, f"resume failed: {e}")
+        display_history_prefix = []
+        messages = _history_to_messages(history)
+        cwd = os.getenv("TERMINAL_CWD", os.getcwd())
+        now = time.time()
+        # A delegated child mid-run emits no native session events of its own —
+        # report its liveness from the relay registry so the window paints a
+        # busy indicator instead of a dead idle transcript.
+        child_running = target in _active_child_runs
+        with _session_resume_lock:
+            live = _find_live_session_by_key(target)
+            if live is not None:
+                if lease is not None:
+                    lease.release()
+                other_sid, other_session = live
+                payload = _live_session_payload(
+                    other_sid,
+                    other_session,
+                    cols=cols,
+                    touch=True,
+                    transport=current_transport() or _stdio_transport,
+                )
+                payload["resumed"] = target
+                # Lazy watch sessions never own a run loop, so the payload's
+                # running flag is always False — overlay the child-run registry
+                # so a window refresh mid-delegation keeps its busy indicator.
+                if other_session.get("agent") is None and child_running:
+                    payload["running"] = True
+                    payload["status"] = "streaming"
+                return _ok(rid, payload)
+            with _sessions_lock:
+                _sessions[sid] = {
+                    "agent": None,
+                    "agent_error": None,
+                    "agent_ready": threading.Event(),
+                    "attached_images": [],
+                    "close_on_disconnect": is_truthy_value(
+                        params.get("close_on_disconnect", False)
+                    ),
+                    "active_session_lease": lease,
+                    "cols": cols,
+                    "created_at": now,
+                    "display_history_prefix": display_history_prefix,
+                    "edit_snapshots": {},
+                    "explicit_cwd": False,
+                    "history": history,
+                    "history_lock": threading.Lock(),
+                    "history_version": 0,
+                    "image_counter": 0,
+                    "cwd": cwd,
+                    "inflight_turn": None,
+                    "last_active": now,
+                    "pending_title": None,
+                    "profile_home": str(profile_home) if profile_home is not None else None,
+                    "resume_session_id": target,
+                    "running": False,
+                    "session_key": target,
+                    "show_reasoning": _load_show_reasoning(),
+                    "slash_worker": None,
+                    "tool_progress_mode": _load_tool_progress_mode(),
+                    "tool_started_at": {},
+                    "transport": current_transport() or _stdio_transport,
+                }
+                _register_session_cwd(_sessions[sid])
+        return _ok(
+            rid,
+            {
+                "session_id": sid,
+                "resumed": target,
+                "message_count": len(messages),
+                "messages": messages,
+                "info": {
+                    "cwd": cwd,
+                    "branch": _git_branch_for_cwd(cwd),
+                    "model": _resolve_model(),
+                    "tools": {},
+                    "skills": {},
+                    "lazy": True,
+                    "desktop_contract": DESKTOP_BACKEND_CONTRACT,
+                    "profile_name": _current_profile_name(),
+                },
+                "inflight": None,
+                "running": child_running,
+                "session_key": target,
+                "started_at": now,
+                "status": "streaming" if child_running else "idle",
+            },
+        )
 
     # Build the agent OUTSIDE the lock — _make_agent can block for seconds
     # (MCP discovery, prompt/skill build, AIAgent construction). Holding
@@ -3971,7 +4174,9 @@ def _session_live_status(sid: str, session: dict) -> str:
     if _session_pending_kind(sid):
         return "waiting"
     ready = session.get("agent_ready")
-    if ready is not None and not ready.is_set():
+    # Unset + build never started = a lazy watch session sitting idle, not a
+    # session stuck mid-construction.
+    if ready is not None and not ready.is_set() and session.get("agent_build_started"):
         return "starting"
     if session.get("running"):
         return "working"

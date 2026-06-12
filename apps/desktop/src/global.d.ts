@@ -20,8 +20,10 @@ declare global {
       getGatewayWsUrl: (profile?: null | string) => Promise<string>
       // Open (or focus) a standalone OS window for a single chat session so
       // the user can work with multiple chats side by side. Returns ok:false
-      // with an error code when the sessionId is empty/invalid.
-      openSessionWindow: (sessionId: string) => Promise<{ ok: boolean; error?: string }>
+      // with an error code when the sessionId is empty/invalid. `watch` opens
+      // a spectator window (lazy resume — no agent build) for live-streaming
+      // a running subagent's session.
+      openSessionWindow: (sessionId: string, opts?: { watch?: boolean }) => Promise<{ ok: boolean; error?: string }>
       getBootProgress: () => Promise<DesktopBootProgress>
       getConnectionConfig: (profile?: null | string) => Promise<DesktopConnectionConfig>
       saveConnectionConfig: (payload: DesktopConnectionConfigInput) => Promise<DesktopConnectionConfig>

@@ -1354,7 +1354,7 @@ export interface Translations {
       loadingQuestion: string
       other: string
       placeholder: string
-      shortcut: string
+      shortcutSuffix: string
       back: string
       skip: string
       send: string

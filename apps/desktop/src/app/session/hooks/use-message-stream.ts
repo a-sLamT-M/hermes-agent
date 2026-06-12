@@ -55,6 +55,7 @@ interface MessageStreamOptions {
   queryClient: QueryClient
   refreshHermesConfig: () => Promise<void>
   refreshSessions: () => Promise<void>
+  sessionStateByRuntimeIdRef: MutableRefObject<Map<string, ClientSessionState>>
   updateSessionState: (
     sessionId: string,
     updater: (state: ClientSessionState) => ClientSessionState,
@@ -248,8 +249,14 @@ export function useMessageStream({
   queryClient,
   refreshHermesConfig,
   refreshSessions,
+  sessionStateByRuntimeIdRef,
   updateSessionState
 }: MessageStreamOptions) {
+  const sessionInterrupted = useCallback(
+    (sessionId: string) => sessionStateByRuntimeIdRef.current.get(sessionId)?.interrupted ?? false,
+    [sessionStateByRuntimeIdRef]
+  )
+
   // Patch the in-flight assistant message (or seed it). Centralises the
   // streamId/groupId bookkeeping every event callback would otherwise repeat.
   const mutateStream = useCallback(
@@ -473,6 +480,10 @@ export function useMessageStream({
       // a tool part can't jump ahead of the text that preceded it.
       flushQueuedDeltas(sessionId)
 
+      if (sessionInterrupted(sessionId)) {
+        return
+      }
+
       // The composer status stack owns todo display now (no inline panel) —
       // mirror every todo state the tool reports into its session store.
       if (payload?.name === 'todo') {
@@ -501,7 +512,7 @@ export function useMessageStream({
         { pending: m => phase !== 'complete' || (m.pending ?? false) }
       )
     },
-    [flushQueuedDeltas, mutateStream]
+    [flushQueuedDeltas, mutateStream, sessionInterrupted]
   )
 
   const completeAssistantMessage = useCallback(
@@ -885,7 +896,10 @@ export function useMessageStream({
 
           // terminal/process tool calls are the only things that spawn or reap
           // background processes — sync the composer status stack right after.
-          if (payload?.name === 'terminal' || payload?.name === 'process') {
+          if (
+            !sessionInterrupted(sessionId) &&
+            (payload?.name === 'terminal' || payload?.name === 'process')
+          ) {
             void refreshBackgroundProcesses(sessionId)
           }
         }
@@ -894,7 +908,7 @@ export function useMessageStream({
           recordToolDiff(payload.tool_id || payload.name || '', payload.inline_diff)
         }
       } else if (SUBAGENT_EVENT_TYPES.has(event.type)) {
-        if (sessionId && payload) {
+        if (sessionId && payload && !sessionInterrupted(sessionId)) {
           if (!nativeSubagentSessionsRef.current.has(sessionId)) {
             pruneDelegateFallbackSubagents(sessionId)
           }
@@ -1046,6 +1060,7 @@ export function useMessageStream({
       flushQueuedDeltas,
       queryClient,
       refreshHermesConfig,
+      sessionInterrupted,
       updateSessionState,
       upsertToolCall
     ]

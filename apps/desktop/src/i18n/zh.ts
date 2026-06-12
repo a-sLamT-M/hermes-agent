@@ -1372,14 +1372,14 @@ export const zh: Translations = {
       '/quit': '退出 hermes'
     },
     hotkeyDescs: {
-      '@': '引用文件、文件夹、URL、git',
-      '/': '斜杠命令面板',
-      '?': '此快速帮助 (删除以关闭)',
-      Enter: '发送 · Shift+Enter 换行',
-      'Cmd/Ctrl+K': '发送下一条排队的回合',
-      'Cmd/Ctrl+L': '重绘',
-      Esc: '关闭弹窗 · 取消运行',
-      '↑ / ↓': '循环弹窗 / 历史'
+      'composer.mention': '引用文件、文件夹、URL、git',
+      'composer.slash': '斜杠命令面板',
+      'composer.help': '此快速帮助 (删除以关闭)',
+      'composer.sendNewline': '发送 · Shift+Enter 换行',
+      'composer.sendQueued': '发送下一条排队的回合',
+      'keybinds.openPanel': '所有键盘快捷键',
+      'composer.cancel': '关闭弹窗 · 取消运行',
+      'composer.history': '循环弹窗 / 历史'
     },
     attachUrlTitle: '附加 URL',
     attachUrlDesc: 'Hermes 将抓取该页面并作为本回合的上下文。',
@@ -1876,7 +1876,7 @@ export const zh: Translations = {
       loadingQuestion: '正在加载问题…',
       other: '其他 (输入你的答案)',
       placeholder: '输入你的答案…',
-      shortcut: '⌘/Ctrl + Enter 发送',
+      shortcutSuffix: ' 发送',
       back: '返回',
       skip: '跳过',
       send: '发送'

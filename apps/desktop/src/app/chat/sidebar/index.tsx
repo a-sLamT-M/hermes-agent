@@ -39,6 +39,7 @@ import { Tip } from '@/components/ui/tooltip'
 import { searchSessions, type SessionInfo, type SessionSearchResult } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { profileColor } from '@/lib/profile-color'
+import { comboTokens } from '@/lib/keybinds/combo'
 import { sessionMatchesSearch } from '@/lib/session-search'
 import { normalizeSessionSource, sessionSourceLabel } from '@/lib/session-source'
 import { cn } from '@/lib/utils'
@@ -108,11 +109,7 @@ const VIRTUALIZE_THRESHOLD = 25
 const NON_SESSION_INITIAL_ROWS = 3
 const NON_SESSION_LOAD_STEP = 10
 
-// Render the modifier key the user actually presses on this platform. The
-// global accelerator is bound to both Cmd+N (macOS) and Ctrl+N (everywhere
-// else) in desktop-controller.tsx, but the hint should match muscle memory.
-const NEW_SESSION_KBD: readonly string[] =
-  typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac') ? ['⌘', 'N'] : ['Ctrl', 'N']
+const NEW_SESSION_KBD = comboTokens('mod+n')
 
 const SIDEBAR_NAV: SidebarNavItem[] = [
   {
@@ -830,8 +827,9 @@ export function ChatSidebar({
                           <span className="min-w-0 flex-1 truncate">{s.nav[item.id] ?? item.label}</span>
                           {isNewSession && (
                             <KbdGroup
-                              className={cn('ml-auto', newSessionKbdFlash && 'opacity-100!')}
+                              className={cn('ml-auto opacity-55', newSessionKbdFlash && 'opacity-100!')}
                               keys={[...NEW_SESSION_KBD]}
+                              size="sm"
                             />
                           )}
                         </>

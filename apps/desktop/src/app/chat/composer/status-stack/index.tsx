@@ -2,6 +2,7 @@ import { useStore } from '@nanostores/react'
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 
+import { blurComposerInput } from '@/app/chat/composer/focus'
 import { AGENTS_ROUTE } from '@/app/routes'
 import { composerDockCard } from '@/components/chat/composer-dock'
 import { StatusSection } from '@/components/chat/status-section'
@@ -80,11 +81,12 @@ export function ComposerStatusStack({ queue, sessionId }: ComposerStatusStackPro
 
   const openAgents = () => navigate(AGENTS_ROUTE)
 
-  // A subagent row opens ITS session in a standalone window (the event stream
-  // carries the child's session id); the Agents-view spawn tree is the fallback
-  // for events from older gateways that don't.
+  // A subagent row opens ITS session in a standalone WATCH window — a lazy
+  // resume (no agent build) that the gateway's child-session mirror
+  // livestreams the run into. Agents-view spawn tree is the fallback for
+  // events from older gateways without a session id.
   const openSubagent = (item: ComposerStatusItem) =>
-    item.sessionId ? void openSessionInNewWindow(item.sessionId) : openAgents()
+    item.sessionId ? void openSessionInNewWindow(item.sessionId, { watch: true }) : openAgents()
 
   const sections: { key: string; node: ReactNode }[] = groups.map(group => ({
     key: group.type,
@@ -171,7 +173,11 @@ export function ComposerStatusStack({ queue, sessionId }: ComposerStatusStackPro
   }
 
   return (
-    <div className="absolute inset-x-0 bottom-full z-6 -mb-[9px] max-h-[40vh] overflow-y-auto" ref={stackRef}>
+    <div
+      className="absolute inset-x-0 bottom-full z-6 -mb-[9px] max-h-[40vh] overflow-y-auto"
+      onPointerDownCapture={() => blurComposerInput()}
+      ref={stackRef}
+    >
       {/* The card paints the shared --composer-fill (rest / scrolled / focused
           all match the composer surface by construction); on scroll we only
           ghost the CONTENT — element opacity on the card would kill the blur. */}
@@ -179,9 +185,7 @@ export function ComposerStatusStack({ queue, sessionId }: ComposerStatusStackPro
         <div
           className={cn(
             'transition-opacity duration-200 ease-out',
-            scrolledUp
-              ? 'opacity-30 group-hover/composer:opacity-100 group-focus-within/composer:opacity-100'
-              : 'opacity-100'
+            scrolledUp ? 'opacity-30 group-hover/composer:opacity-100' : 'opacity-100'
           )}
         >
           {sections.map(section => (

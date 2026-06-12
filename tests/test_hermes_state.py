@@ -2741,6 +2741,45 @@ class TestListSessionsRich:
         ids = [s["id"] for s in sessions]
         assert "branch" in ids, "Branch session should be visible in default list"
 
+    def test_delegate_subagent_marker_hides_orphaned_row(self, db):
+        """``_delegate_from`` keeps delegate rows out of pickers after orphaning."""
+        db.create_session("parent", "cli")
+        db.create_session(
+            "delegate",
+            "cli",
+            parent_session_id="parent",
+            model_config={"_delegate_from": "parent"},
+        )
+        db.append_message("delegate", "user", "scan the repo")
+
+        assert "delegate" not in [s["id"] for s in db.list_sessions_rich()]
+
+        db._conn.execute(
+            "UPDATE sessions SET parent_session_id = NULL WHERE id = ?", ("delegate",)
+        )
+        db._conn.commit()
+
+        assert "delegate" not in [s["id"] for s in db.list_sessions_rich()]
+
+    def test_delete_parent_cascades_delegate_children(self, db):
+        db.create_session("parent", "cli")
+        db.create_session(
+            "delegate",
+            "cli",
+            parent_session_id="parent",
+            model_config={"_delegate_from": "parent"},
+        )
+        db.create_session(
+            "branch",
+            "cli",
+            parent_session_id="parent",
+            model_config={"_branched_from": "parent"},
+        )
+
+        assert db.delete_session("parent") is True
+        assert db.get_session("delegate") is None
+        assert db.get_session("branch") is not None
+
     def test_branch_session_visible_after_parent_reopen_and_reend(self, db):
         """Branch sessions stay visible after the parent is reopened and re-ended.
 

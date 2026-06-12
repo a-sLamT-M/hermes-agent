@@ -26,7 +26,12 @@ const { pathToFileURL } = require('node:url')
 const { execFileSync, spawn } = require('node:child_process')
 const { detectRemoteDisplay, isWindowsBinaryPathInWsl, isWslEnvironment } = require('./bootstrap-platform.cjs')
 const { runBootstrap } = require('./bootstrap-runner.cjs')
-const { buildSessionWindowUrl, createSessionWindowRegistry } = require('./session-windows.cjs')
+const {
+  buildSessionWindowUrl,
+  createSessionWindowRegistry,
+  SESSION_WINDOW_MIN_HEIGHT,
+  SESSION_WINDOW_MIN_WIDTH
+} = require('./session-windows.cjs')
 const { canImportHermesCli, verifyHermesCli } = require('./backend-probes.cjs')
 const { probeGatewayWebSocket } = require('./gateway-ws-probe.cjs')
 const { adoptServedDashboardToken } = require('./dashboard-token.cjs')
@@ -5004,14 +5009,14 @@ function focusWindow(win) {
 }
 
 // Open (or focus) a standalone window for a single chat session.
-function createSessionWindow(sessionId) {
+function createSessionWindow(sessionId, { watch = false } = {}) {
   return sessionWindows.openOrFocus(sessionId, () => {
     const icon = getAppIconPath()
     const win = new BrowserWindow({
-      width: 480,
-      height: 800,
-      minWidth: 420,
-      minHeight: 620,
+      width: SESSION_WINDOW_MIN_WIDTH,
+      height: SESSION_WINDOW_MIN_HEIGHT,
+      minWidth: SESSION_WINDOW_MIN_WIDTH,
+      minHeight: SESSION_WINDOW_MIN_HEIGHT,
       title: 'Hermes',
       titleBarStyle: 'hidden',
       titleBarOverlay: getTitleBarOverlayOptions(),
@@ -5054,7 +5059,8 @@ function createSessionWindow(sessionId) {
     win.loadURL(
       buildSessionWindowUrl(sessionId, {
         devServer: DEV_SERVER,
-        rendererIndexPath: DEV_SERVER ? undefined : resolveRendererIndex()
+        rendererIndexPath: DEV_SERVER ? undefined : resolveRendererIndex(),
+        watch
       })
     )
 
@@ -5236,12 +5242,12 @@ ipcMain.handle('hermes:backend:touch', async (_event, profile) => {
   return { ok: true }
 })
 ipcMain.handle('hermes:gateway:ws-url', async (_event, profile) => freshGatewayWsUrl(profile))
-ipcMain.handle('hermes:window:openSession', async (_event, sessionId) => {
+ipcMain.handle('hermes:window:openSession', async (_event, sessionId, opts) => {
   if (typeof sessionId !== 'string' || !sessionId.trim()) {
     return { ok: false, error: 'invalid-session-id' }
   }
 
-  createSessionWindow(sessionId.trim())
+  createSessionWindow(sessionId.trim(), { watch: opts?.watch === true })
 
   return { ok: true }
 })

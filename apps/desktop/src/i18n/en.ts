@@ -1184,14 +1184,14 @@ export const en: Translations = {
       '/quit': 'exit hermes'
     },
     hotkeyDescs: {
-      '@': 'reference files, folders, urls, git',
-      '/': 'slash command palette',
-      '?': 'this quick help (delete to dismiss)',
-      Enter: 'send · Shift+Enter for newline',
-      'Cmd/Ctrl+Shift+K': 'send next queued turn',
-      'Cmd/Ctrl+/': 'all keyboard shortcuts',
-      Esc: 'close popover · cancel run',
-      '↑ / ↓': 'cycle popover / history'
+      'composer.mention': 'reference files, folders, urls, git',
+      'composer.slash': 'slash command palette',
+      'composer.help': 'this quick help (delete to dismiss)',
+      'composer.sendNewline': 'send · Shift+Enter for newline',
+      'composer.sendQueued': 'send next queued turn',
+      'keybinds.openPanel': 'all keyboard shortcuts',
+      'composer.cancel': 'close popover · cancel run',
+      'composer.history': 'cycle popover / history'
     },
     attachUrlTitle: 'Attach a URL',
     attachUrlDesc: 'Hermes will fetch the page and include it as context for this turn.',
@@ -1696,7 +1696,7 @@ export const en: Translations = {
       loadingQuestion: 'Loading question…',
       other: 'Other (type your answer)',
       placeholder: 'Type your answer…',
-      shortcut: '⌘/Ctrl + Enter to send',
+      shortcutSuffix: ' to send',
       back: 'Back',
       skip: 'Skip',
       send: 'Send'

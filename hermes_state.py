@@ -29,6 +29,29 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 logger = logging.getLogger(__name__)
 
+_DELEGATE_FROM_JSON = "json_extract(COALESCE(model_config, '{}'), '$._delegate_from')"
+
+
+def _collect_delegate_child_ids(conn, parent_ids: List[str]) -> List[str]:
+    """Return delegate-subagent session ids tied to *parent_ids* (linked or orphaned)."""
+    if not parent_ids:
+        return []
+    placeholders = ",".join("?" * len(parent_ids))
+    params = list(parent_ids)
+    found: set[str] = set()
+    cursor = conn.execute(
+        f"SELECT id FROM sessions WHERE parent_session_id IN ({placeholders}) "
+        f"AND {_DELEGATE_FROM_JSON} IS NOT NULL",
+        params,
+    )
+    found.update(row["id"] for row in cursor.fetchall())
+    cursor = conn.execute(
+        f"SELECT id FROM sessions WHERE {_DELEGATE_FROM_JSON} IN ({placeholders})",
+        params,
+    )
+    found.update(row["id"] for row in cursor.fetchall())
+    return list(found)
+
 T = TypeVar("T")
 
 DEFAULT_DB_PATH = get_hermes_home() / "state.db"
@@ -1939,6 +1962,11 @@ class SessionDB:
                 "            AND p.end_reason = 'branched'"
                 "            AND s.started_at >= p.ended_at))"
             )
+            # Delegate subagents carry ``_delegate_from`` in model_config so
+            # they stay hidden after a parent delete nulls parent_session_id.
+            where_clauses.append(
+                "json_extract(COALESCE(s.model_config, '{}'), '$._delegate_from') IS NULL"
+            )
 
         if source:
             where_clauses.append("s.source = ?")
@@ -3560,10 +3588,14 @@ class SessionDB:
             # children (parent ended with end_reason='branched').
             where_clauses.append(
                 "(s.parent_session_id IS NULL"
+                " OR json_extract(s.model_config, '$._branched_from') IS NOT NULL"
                 " OR EXISTS (SELECT 1 FROM sessions p"
                 "            WHERE p.id = s.parent_session_id"
                 "            AND p.end_reason = 'branched'"
                 "            AND s.started_at >= p.ended_at))"
+            )
+            where_clauses.append(
+                "json_extract(COALESCE(s.model_config, '{}'), '$._delegate_from') IS NULL"
             )
         if source:
             where_clauses.append("s.source = ?")
@@ -3667,19 +3699,31 @@ class SessionDB:
     ) -> bool:
         """Delete a session and all its messages.
 
-        Child sessions are orphaned (parent_session_id set to NULL) rather
-        than cascade-deleted, so they remain accessible independently.
+        Delegate subagent children (``model_config._delegate_from``) are
+        cascade-deleted with the parent so they never resurface in session
+        pickers as orphaned rows. Branch / compression children are orphaned
+        (``parent_session_id → NULL``) so they remain accessible independently.
         When *sessions_dir* is provided, also removes on-disk transcript
-        files (``.json`` / ``.jsonl`` / ``request_dump_*``) for the deleted
+        files (``.json`` / ``.jsonl`` / ``request_dump_*``) for every deleted
         session. Returns True if the session was found and deleted.
         """
+        removed_delegate_ids: List[str] = []
+
         def _do(conn):
             cursor = conn.execute(
                 "SELECT COUNT(*) FROM sessions WHERE id = ?", (session_id,)
             )
             if cursor.fetchone()[0] == 0:
                 return False
-            # Orphan child sessions so FK constraint is satisfied
+            delegate_ids = _collect_delegate_child_ids(conn, [session_id])
+            if delegate_ids:
+                removed_delegate_ids.extend(delegate_ids)
+                dph = ",".join("?" * len(delegate_ids))
+                conn.execute(
+                    f"DELETE FROM messages WHERE session_id IN ({dph})", delegate_ids
+                )
+                conn.execute(f"DELETE FROM sessions WHERE id IN ({dph})", delegate_ids)
+            # Orphan remaining child sessions (branches, etc.) so FK is satisfied.
             conn.execute(
                 "UPDATE sessions SET parent_session_id = NULL "
                 "WHERE parent_session_id = ?",
@@ -3691,8 +3735,10 @@ class SessionDB:
 
         deleted = self._execute_write(_do)
         if deleted:
+            for delegate_id in removed_delegate_ids:
+                self._remove_session_files(sessions_dir, delegate_id)
             self._remove_session_files(sessions_dir, session_id)
-        return deleted
+        return bool(deleted)
 
     def delete_session_if_empty(
         self,
@@ -3750,10 +3796,9 @@ class SessionDB:
         * Unknown IDs are silently skipped (no 404) — selection state
           in the UI can race against another tab's delete, and we'd
           rather succeed-on-the-rest than fail-the-whole-batch.
-        * Children of every deleted ID are orphaned
-          (``parent_session_id → NULL``), never cascade-deleted, so a
-          branch / subagent transcript survives an inadvertent parent
-          delete.
+        * Delegate subagent children (``model_config._delegate_from``) are
+          cascade-deleted with their parent; branch children are orphaned
+          (``parent_session_id → NULL``) so they stay accessible.
         * Messages and the session row both go in one
           ``_execute_write`` call so a partial failure can't leave the
           DB in a "messages gone but session row still there" state.
@@ -3776,6 +3821,7 @@ class SessionDB:
             return 0
 
         removed_ids: list[str] = []
+        removed_delegate_ids: list[str] = []
 
         def _do(conn):
             placeholders = ",".join("?" * len(unique_ids))
@@ -3790,7 +3836,15 @@ class SessionDB:
                 return 0
 
             existing_placeholders = ",".join("?" * len(existing))
-            # Orphan children whose parent is in the kill list so the
+            delegate_ids = _collect_delegate_child_ids(conn, existing)
+            if delegate_ids:
+                removed_delegate_ids.extend(delegate_ids)
+                dph = ",".join("?" * len(delegate_ids))
+                conn.execute(
+                    f"DELETE FROM messages WHERE session_id IN ({dph})", delegate_ids
+                )
+                conn.execute(f"DELETE FROM sessions WHERE id IN ({dph})", delegate_ids)
+            # Orphan remaining children whose parent is in the kill list so the
             # FK constraint stays satisfied. Pin children whose parent
             # is itself in the kill list rather than NULL-ing parents
             # of survivors — the IN list on ``parent_session_id`` does
@@ -3812,6 +3866,8 @@ class SessionDB:
             return len(existing)
 
         count = self._execute_write(_do)
+        for sid in removed_delegate_ids:
+            self._remove_session_files(sessions_dir, sid)
         for sid in removed_ids:
             self._remove_session_files(sessions_dir, sid)
         return count

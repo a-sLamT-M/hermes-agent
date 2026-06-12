@@ -26,7 +26,8 @@ export interface ComposerStatusItem {
   id: string
   /** background process: captured stdout/stderr tail for the inline viewer. */
   output?: string
-  /** subagent: its own stored session id — row click opens that session window. */
+  /** subagent: its own stored session id — row click opens that session window
+   *  (livestreamed by the gateway's child-session mirror). */
   sessionId?: string
   state: StatusItemState
   title: string

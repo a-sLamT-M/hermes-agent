@@ -1278,14 +1278,14 @@ export const zhHant = defineLocale({
       '/quit': '結束 hermes'
     },
     hotkeyDescs: {
-      '@': '參照檔案、資料夾、URL、git',
-      '/': '斜線指令面板',
-      '?': '此快速說明（刪除以關閉）',
-      Enter: '傳送 · Shift+Enter 換行',
-      'Cmd/Ctrl+K': '傳送下一個排隊的回合',
-      'Cmd/Ctrl+L': '重繪',
-      Esc: '關閉彈出視窗 · 取消執行',
-      '↑ / ↓': '循環彈出視窗 / 歷史記錄'
+      'composer.mention': '參照檔案、資料夾、URL、git',
+      'composer.slash': '斜線指令面板',
+      'composer.help': '此快速說明（刪除以關閉）',
+      'composer.sendNewline': '傳送 · Shift+Enter 換行',
+      'composer.sendQueued': '傳送下一個排隊的回合',
+      'keybinds.openPanel': '所有鍵盤快捷鍵',
+      'composer.cancel': '關閉彈出視窗 · 取消執行',
+      'composer.history': '循環彈出視窗 / 歷史記錄'
     },
     attachUrlTitle: '附加 URL',
     attachUrlDesc: 'Hermes 將擷取該頁面並作為此回合的脈絡。',
@@ -1781,7 +1781,7 @@ export const zhHant = defineLocale({
       loadingQuestion: '正在載入問題…',
       other: '其他（輸入您的答案）',
       placeholder: '輸入您的答案…',
-      shortcut: '⌘/Ctrl + Enter 傳送',
+      shortcutSuffix: ' 傳送',
       back: '返回',
       skip: '略過',
       send: '傳送'

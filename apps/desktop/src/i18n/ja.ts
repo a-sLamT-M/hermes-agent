@@ -1322,14 +1322,14 @@ export const ja = defineLocale({
       '/quit': 'hermes を終了'
     },
     hotkeyDescs: {
-      '@': 'ファイル、フォルダー、URL、Git を参照',
-      '/': 'スラッシュコマンドパレット',
-      '?': 'クイックヘルプ（削除で閉じる）',
-      Enter: '送信 · 改行は Shift+Enter',
-      'Cmd/Ctrl+K': '次のキュー済みターンを送信',
-      'Cmd/Ctrl+L': '再描画',
-      Esc: 'ポップオーバーを閉じる · 実行をキャンセル',
-      '↑ / ↓': 'ポップオーバー / 履歴を切り替え'
+      'composer.mention': 'ファイル、フォルダー、URL、Git を参照',
+      'composer.slash': 'スラッシュコマンドパレット',
+      'composer.help': 'クイックヘルプ（削除で閉じる）',
+      'composer.sendNewline': '送信 · 改行は Shift+Enter',
+      'composer.sendQueued': '次のキュー済みターンを送信',
+      'keybinds.openPanel': 'すべてのキーボードショートカット',
+      'composer.cancel': 'ポップオーバーを閉じる · 実行をキャンセル',
+      'composer.history': 'ポップオーバー / 履歴を切り替え'
     },
     attachUrlTitle: 'URL を添付',
     attachUrlDesc: 'Hermes がページを取得し、このターンのコンテキストとして含めます。',
@@ -1837,7 +1837,7 @@ export const ja = defineLocale({
       loadingQuestion: '質問を読み込み中…',
       other: 'その他（回答を入力）',
       placeholder: '回答を入力…',
-      shortcut: '⌘/Ctrl + Enter で送信',
+      shortcutSuffix: ' で送信',
       back: '戻る',
       skip: 'スキップ',
       send: '送信'
