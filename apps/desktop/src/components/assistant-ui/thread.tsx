@@ -797,7 +797,7 @@ const UserMessage: FC<{
   const hasBody = messageText.trim().length > 0
   const isLatestUser = messageId === latestUserId
   const showStop = isLatestUser && threadRunning && Boolean(onCancel)
-  const showRestore = !isLatestUser && !threadRunning && Boolean(onRestoreToMessage) && hasBody
+  const showRestore = !threadRunning && Boolean(onRestoreToMessage) && hasBody
 
   const bubbleClassName = cn(
     USER_BUBBLE_BASE_CLASS,
