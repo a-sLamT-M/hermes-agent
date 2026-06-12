@@ -116,6 +116,18 @@ function isSessionNotFoundError(error: unknown): boolean {
   return /session not found/i.test(message)
 }
 
+// The gateway refuses prompt.submit while a turn is running (4009 "session
+// busy"). Edit/restore (revert) can fire mid-turn, so they interrupt first then
+// retry the submit until the cooperative interrupt has wound the turn down.
+const REWIND_INTERRUPT_TIMEOUT_MS = 6_000
+const REWIND_RETRY_INTERVAL_MS = 150
+
+function isSessionBusyError(error: unknown): boolean {
+  return /session busy/i.test(error instanceof Error ? error.message : String(error))
+}
+
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
+
 function base64FromDataUrl(dataUrl: string): string {
   const comma = dataUrl.indexOf(',')
 
@@ -1429,11 +1441,50 @@ export function usePromptActions({
   // user turn and everything after it from the session history, then the same
   // text is submitted as a fresh turn. Callers confirm before invoking; errors
   // are rethrown so the confirmation dialog can surface them inline.
+  // Submit a rewind (truncate-before-ordinal + resubmit). Because edit/restore
+  // can fire while a turn is streaming, interrupt the live turn first, then
+  // retry the submit until the gateway stops reporting "session busy" — the
+  // interrupt is cooperative, so the running turn takes a beat to wind down.
+  const submitRewindPrompt = useCallback(
+    async (sessionId: string, text: string, truncateOrdinal: number | undefined, wasRunning: boolean) => {
+      if (wasRunning) {
+        try {
+          await requestGateway('session.interrupt', { session_id: sessionId })
+        } catch {
+          // Best-effort — the busy-retry below still gates the submit.
+        }
+      }
+
+      const deadline = Date.now() + REWIND_INTERRUPT_TIMEOUT_MS
+
+      for (;;) {
+        try {
+          await requestGateway('prompt.submit', {
+            session_id: sessionId,
+            text,
+            ...(truncateOrdinal !== undefined && { truncate_before_user_ordinal: truncateOrdinal })
+          })
+
+          return
+        } catch (err) {
+          if (isSessionBusyError(err) && Date.now() < deadline) {
+            await sleep(REWIND_RETRY_INTERVAL_MS)
+
+            continue
+          }
+
+          throw err
+        }
+      }
+    },
+    [requestGateway]
+  )
+
   const restoreToMessage = useCallback(
     async (messageId: string) => {
       const sessionId = activeSessionId || activeSessionIdRef.current
 
-      if (!sessionId || $busy.get()) {
+      if (!sessionId) {
         return
       }
 
@@ -1451,6 +1502,7 @@ export function usePromptActions({
         return
       }
 
+      const wasRunning = $busy.get()
       const truncateBeforeUserOrdinal = visibleUserOrdinal(messages, sourceIndex)
 
       // The turns we're discarding may have spawned todos and background
@@ -1474,11 +1526,7 @@ export function usePromptActions({
       }))
 
       try {
-        await requestGateway('prompt.submit', {
-          session_id: sessionId,
-          text,
-          truncate_before_user_ordinal: truncateBeforeUserOrdinal
-        })
+        await submitRewindPrompt(sessionId, text, truncateBeforeUserOrdinal, wasRunning)
       } catch (err) {
         setMutableRef(busyRef, false)
         setBusy(false)
@@ -1487,7 +1535,7 @@ export function usePromptActions({
         throw err
       }
     },
-    [activeSessionId, activeSessionIdRef, busyRef, requestGateway, updateSessionState]
+    [activeSessionId, activeSessionIdRef, busyRef, submitRewindPrompt, updateSessionState]
   )
 
   const editMessage = useCallback(
@@ -1496,7 +1544,7 @@ export function usePromptActions({
       const sourceId = edited.sourceId || edited.parentId
       const text = appendText(edited)
 
-      if (!sessionId || !sourceId || !text || edited.role !== 'user' || $busy.get()) {
+      if (!sessionId || !sourceId || !text || edited.role !== 'user') {
         return
       }
 
@@ -1507,6 +1555,11 @@ export function usePromptActions({
       if (!source || source.role !== 'user' || chatMessageText(source).trim() === text) {
         return
       }
+
+      // Sending an edit is a revert: rewind to this prompt and re-run with the
+      // new text. It can fire mid-turn, so capture the live state — the submit
+      // helper interrupts first when a turn is running.
+      const wasRunning = $busy.get()
 
       // Failed turn: optimistic user msg never reached the gateway, so truncating
       // by ordinal would 422. Submit as a plain resend instead.
@@ -1534,24 +1587,18 @@ export function usePromptActions({
         messages: [...state.messages.slice(0, sourceIndex), editedMessage]
       }))
 
-      const submit = (truncateOrdinal?: number) =>
-        requestGateway('prompt.submit', {
-          session_id: sessionId,
-          text,
-          ...(truncateOrdinal !== undefined && { truncate_before_user_ordinal: truncateOrdinal })
-        })
-
       const isStaleTargetError = (err: unknown) =>
         /no longer in session history|not in session history/i.test(err instanceof Error ? err.message : String(err))
 
       try {
-        await submit(isFailedTurn ? undefined : visibleUserOrdinal(messages, sourceIndex))
+        await submitRewindPrompt(sessionId, text, isFailedTurn ? undefined : visibleUserOrdinal(messages, sourceIndex), wasRunning)
       } catch (err) {
         let surfaced = err
 
         if (!isFailedTurn && isStaleTargetError(err)) {
           try {
-            await submit()
+            // Already interrupted on the first attempt — submit as a plain resend.
+            await submitRewindPrompt(sessionId, text, undefined, false)
 
             return
           } catch (retryErr) {
@@ -1566,7 +1613,7 @@ export function usePromptActions({
         notifyError(surfaced, copy.editFailed)
       }
     },
-    [activeSessionId, activeSessionIdRef, busyRef, copy.editFailed, requestGateway, updateSessionState]
+    [activeSessionId, activeSessionIdRef, busyRef, copy.editFailed, submitRewindPrompt, updateSessionState]
   )
 
   const handleThreadMessagesChange = useCallback(

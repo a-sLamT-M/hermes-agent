@@ -797,12 +797,15 @@ const UserMessage: FC<{
   const hasBody = messageText.trim().length > 0
   const isLatestUser = messageId === latestUserId
   const showStop = isLatestUser && threadRunning && Boolean(onCancel)
-  const showRestore = !threadRunning && Boolean(onRestoreToMessage) && hasBody
+  // Restore (re-run this exact prompt) is available everywhere the Stop button
+  // isn't — including mid-stream on older prompts, since the action interrupts
+  // the live turn before rewinding.
+  const showRestore = !showStop && Boolean(onRestoreToMessage) && hasBody
 
   const bubbleClassName = cn(
     USER_BUBBLE_BASE_CLASS,
-    'border-(--ui-stroke-tertiary) pr-9 text-[length:var(--conversation-text-font-size)] leading-(--dt-line-height) text-foreground/95 transition-colors',
-    !threadRunning && 'cursor-pointer hover:border-(--ui-stroke-secondary)'
+    'cursor-pointer pr-9 text-[length:var(--conversation-text-font-size)] leading-(--dt-line-height) text-foreground/95 transition-colors',
+    'border-(--ui-stroke-tertiary) hover:border-(--ui-stroke-secondary)'
   )
 
   const bubbleContent = (
@@ -831,21 +834,19 @@ const UserMessage: FC<{
         <ActionBarPrimitive.Root className="relative w-full max-w-full" data-slot="aui_user-bubble-actions">
           <div className="human-message-with-todos-wrapper flex w-full flex-col gap-0">
             <div className="relative w-full">
-              {threadRunning ? (
-                <div className={bubbleClassName}>{bubbleContent}</div>
-              ) : (
-                <ActionBarPrimitive.Edit asChild>
-                  <button
-                    aria-label={copy.editMessage}
-                    className={bubbleClassName}
-                    onClick={() => triggerHaptic('selection')}
-                    title={copy.editMessage}
-                    type="button"
-                  >
-                    {bubbleContent}
-                  </button>
-                </ActionBarPrimitive.Edit>
-              )}
+              {/* Always editable — clicking opens the edit composer even while a
+                  turn streams; sending the edit reverts (interrupt + rewind). */}
+              <ActionBarPrimitive.Edit asChild>
+                <button
+                  aria-label={copy.editMessage}
+                  className={bubbleClassName}
+                  onClick={() => triggerHaptic('selection')}
+                  title={copy.editMessage}
+                  type="button"
+                >
+                  {bubbleContent}
+                </button>
+              </ActionBarPrimitive.Edit>
               {(showStop || showRestore) && (
                 <div className="pointer-events-none absolute right-2 bottom-2 z-10 flex items-center justify-center opacity-0 transition-opacity group-hover/user-message:opacity-100 group-focus-within/user-message:opacity-100">
                   {showStop ? (

@@ -448,7 +448,7 @@ describe('usePromptActions restoreToMessage', () => {
 
   it('rethrows gateway failures and clears the busy flags for the dialog to surface', async () => {
     const requestGateway = vi.fn(async () => {
-      throw new Error('session busy')
+      throw new Error('gateway exploded')
     })
 
     let lastState: Record<string, unknown> = {}
@@ -463,8 +463,47 @@ describe('usePromptActions restoreToMessage', () => {
       />
     )
 
-    await expect(handle!.restoreToMessage('u2')).rejects.toThrow('session busy')
+    await expect(handle!.restoreToMessage('u2')).rejects.toThrow('gateway exploded')
     expect(lastState.busy).toBe(false)
+  })
+
+  it('interrupts the live turn and retries past "session busy" when reverting mid-stream', async () => {
+    $busy.set(true)
+
+    let submitAttempts = 0
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method === 'prompt.submit') {
+        submitAttempts += 1
+
+        // The cooperative interrupt hasn't wound the turn down yet on the first
+        // try; the second attempt lands once the gateway reports idle.
+        if (submitAttempts === 1) {
+          throw new Error('session busy')
+        }
+      }
+
+      return {} as never
+    })
+
+    let handle: HarnessHandle | null = null
+    render(
+      <Harness
+        onReady={h => (handle = h)}
+        refreshSessions={async () => undefined}
+        requestGateway={requestGateway}
+        seedMessages={$messages.get()}
+      />
+    )
+
+    await handle!.restoreToMessage('u1')
+
+    expect(requestGateway).toHaveBeenCalledWith('session.interrupt', { session_id: RUNTIME_SESSION_ID })
+    expect(submitAttempts).toBe(2)
+    expect(requestGateway).toHaveBeenCalledWith('prompt.submit', {
+      session_id: RUNTIME_SESSION_ID,
+      text: 'first prompt',
+      truncate_before_user_ordinal: 0
+    })
   })
 
   it('ignores non-user targets and unknown ids without touching the gateway', async () => {
