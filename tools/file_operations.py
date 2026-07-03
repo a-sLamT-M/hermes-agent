@@ -37,6 +37,7 @@ from tools.binary_extensions import BINARY_EXTENSIONS
 from agent.file_safety import (
     build_write_denied_paths,
     build_write_denied_prefixes,
+    is_read_denied as _shared_is_read_denied,
     is_write_denied as _shared_is_write_denied,
 )
 
@@ -141,6 +142,11 @@ def _strip_bom(text: str) -> tuple[str, bool]:
 def _has_bom(text: Optional[str]) -> bool:
     """True if ``text`` begins with a UTF-8 BOM."""
     return bool(text) and text.startswith(_UTF8_BOM)
+
+
+def _is_read_denied(path: str) -> bool:
+    """Return True if path is on the read deny list."""
+    return _shared_is_read_denied(path)
 
 
 def _is_write_denied(path: str) -> bool:
@@ -1055,6 +1061,11 @@ class ShellFileOperations(FileOperations):
         """
         # Expand ~ and other shell paths
         path = self._expand_path(path)
+        if _is_read_denied(path):
+            return ReadResult(error=(
+                f"Read denied: '{path}' is a protected credential/internal file. "
+                "Use metadata-only diagnostics (existence, size, mtime) or the dedicated auth flow instead."
+            ))
         
         offset, limit = normalize_read_pagination(offset, limit)
         
@@ -1197,6 +1208,11 @@ class ShellFileOperations(FileOperations):
         Uses cat so the full file is returned regardless of size.
         """
         path = self._expand_path(path)
+        if _is_read_denied(path):
+            return ReadResult(error=(
+                f"Read denied: '{path}' is a protected credential/internal file. "
+                "Use metadata-only diagnostics (existence, size, mtime) or the dedicated auth flow instead."
+            ))
         stat_cmd = f"wc -c < {self._escape_shell_arg(path)} 2>/dev/null"
         stat_result = self._exec(stat_cmd)
         if stat_result.exit_code != 0:

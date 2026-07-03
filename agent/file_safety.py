@@ -77,6 +77,55 @@ def build_write_denied_prefixes(home: str) -> list[str]:
     ]
 
 
+def build_read_denied_paths(home: str) -> set[str]:
+    """Return exact sensitive paths whose contents must not be read."""
+    hermes_home = _hermes_home_path()
+    hermes_root = _hermes_root_path()
+    return {
+        os.path.realpath(p)
+        for p in [
+            os.path.join(home, ".ssh", "id_rsa"),
+            os.path.join(home, ".ssh", "id_ed25519"),
+            os.path.join(home, ".netrc"),
+            os.path.join(home, ".pgpass"),
+            os.path.join(home, ".npmrc"),
+            os.path.join(home, ".pypirc"),
+            os.path.join(home, ".git-credentials"),
+            str(hermes_home / ".env"),
+            str(hermes_root / ".env"),
+            str(hermes_home / ".anthropic_oauth.json"),
+            str(hermes_root / ".anthropic_oauth.json"),
+            str(hermes_home / "google_token.json"),
+            str(hermes_root / "google_token.json"),
+            str(hermes_home / "google_oauth_pending.json"),
+            str(hermes_root / "google_oauth_pending.json"),
+            str(hermes_home / "auth.json"),
+            str(hermes_root / "auth.json"),
+        ]
+    }
+
+
+def build_read_denied_prefixes(home: str) -> list[str]:
+    """Return sensitive directory prefixes whose contents must not be read."""
+    hermes_home = _hermes_home_path()
+    hermes_root = _hermes_root_path()
+    return [
+        os.path.realpath(p) + os.sep
+        for p in [
+            os.path.join(home, ".ssh"),
+            os.path.join(home, ".aws"),
+            os.path.join(home, ".gnupg"),
+            os.path.join(home, ".kube"),
+            os.path.join(home, ".docker"),
+            os.path.join(home, ".azure"),
+            os.path.join(home, ".config", "gh"),
+            os.path.join(home, ".config", "gcloud"),
+            str(hermes_home / "mcp-tokens"),
+            str(hermes_root / "mcp-tokens"),
+        ]
+    ]
+
+
 def get_safe_write_roots() -> set[str]:
     """Return resolved HERMES_WRITE_SAFE_ROOT paths. Supports multiple directories
     separated by ``os.pathsep`` (``:`` on Unix, ``;`` on Windows).
