@@ -3506,11 +3506,20 @@ def run_conversation(
                     else:
                         # Can't compress further and already at minimum tier
                         agent._flush_status_buffer()
+                        root_cause_hint = (
+                            " Possible root causes: stale/incorrect context-length detection, an unavailable or undersized compression model, or a summary-model/provider misconfiguration."
+                            if new_ctx is None else ""
+                        )
                         agent._vprint(f"{agent.log_prefix}❌ Context length exceeded and cannot compress further.", force=True)
-                        agent._vprint(f"{agent.log_prefix}   💡 The conversation has accumulated too much content. Try /new to start fresh, or /compress to manually trigger compression.", force=True)
-                        logger.error(f"{agent.log_prefix}Context length exceeded: {new_tokens:,} tokens. Cannot compress further.")
+                        agent._vprint(
+                            f"{agent.log_prefix}   💡 This is not always a simple 'chat too long' failure.{root_cause_hint} Try /new, /compress, or inspect compression/provider configuration.",
+                            force=True,
+                        )
+                        logger.error(
+                            f"{agent.log_prefix}Context length exceeded: {approx_tokens:,} tokens. Cannot compress further.{root_cause_hint}"
+                        )
                         agent._persist_session(messages, conversation_history)
-                        _final_response = f"Context length exceeded ({new_tokens:,} tokens). Cannot compress further."
+                        _final_response = f"Context length exceeded ({approx_tokens:,} tokens). Cannot compress further.{root_cause_hint}"
                         return {
                             "final_response": _final_response,
                             "messages": messages,
