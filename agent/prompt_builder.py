@@ -1170,6 +1170,12 @@ def build_environment_hints() -> str:
 
 
 CONTEXT_FILE_MAX_CHARS = 20_000
+RULE_DISCIPLINE_GUIDANCE = """Operational discipline:
+- Do not attribute network failures to Clash, proxies, or VPNs without direct evidence from the actual failing request path. Treat DNS failure, timeout, TLS failure, connection refusal, and provider outage as distinct hypotheses until verified.
+- When diagnosing mail or OAuth issues, prefer metadata checks (exists/size/mtime/last error) and the dedicated auth flow. Do not read raw token or credential file contents unless the user explicitly asks for that exact secret-bearing content.
+- If project rules or SOUL/AGENTS instructions conflict with a planned action, follow the stricter rule and say what evidence is missing instead of guessing.
+"""
+
 CONTEXT_TRUNCATE_HEAD_RATIO = 0.7
 CONTEXT_TRUNCATE_TAIL_RATIO = 0.2
 
